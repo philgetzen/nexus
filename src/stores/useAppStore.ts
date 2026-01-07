@@ -13,6 +13,7 @@ import type {
   ViewMode,
   PanelState,
 } from '@/types'
+import type { ProjectFile } from '@/lib/tauri'
 
 // =============================================================================
 // UI Slice
@@ -23,8 +24,6 @@ interface UISlice {
   panels: PanelState
   toggleSidebar: () => void
   toggleInspector: () => void
-  toggleAnalysisPanel: () => void
-  setAnalysisPanelHeight: (height: number) => void
 
   // Search
   searchQuery: string
@@ -56,11 +55,15 @@ interface ProjectSlice {
   removeRecentProject: (projectId: string) => void
   toggleFavorite: (projectId: string) => void
 
-  // Files and symbols
+  // Files and symbols (derived from graph nodes - code files only)
   files: File[]
   symbols: Symbol[]
   setFiles: (files: File[]) => void
   setSymbols: (symbols: Symbol[]) => void
+
+  // All project files (for sidebar - includes ALL file types)
+  allFiles: ProjectFile[]
+  setAllFiles: (files: ProjectFile[]) => void
 }
 
 // =============================================================================
@@ -145,8 +148,6 @@ export const useAppStore = create<AppStore>((set) => ({
   panels: {
     sidebarOpen: true,
     inspectorOpen: true,
-    analysisPanelOpen: false,
-    analysisPanelHeight: 200,
   },
   toggleSidebar: () =>
     set((state) => ({
@@ -155,14 +156,6 @@ export const useAppStore = create<AppStore>((set) => ({
   toggleInspector: () =>
     set((state) => ({
       panels: { ...state.panels, inspectorOpen: !state.panels.inspectorOpen },
-    })),
-  toggleAnalysisPanel: () =>
-    set((state) => ({
-      panels: { ...state.panels, analysisPanelOpen: !state.panels.analysisPanelOpen },
-    })),
-  setAnalysisPanelHeight: (height) =>
-    set((state) => ({
-      panels: { ...state.panels, analysisPanelHeight: height },
     })),
 
   searchQuery: '',
@@ -208,6 +201,9 @@ export const useAppStore = create<AppStore>((set) => ({
   symbols: [],
   setFiles: (files) => set({ files }),
   setSymbols: (symbols) => set({ symbols }),
+
+  allFiles: [],
+  setAllFiles: (allFiles) => set({ allFiles }),
 
   // =========================================================================
   // Graph Slice

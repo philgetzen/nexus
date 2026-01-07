@@ -19,8 +19,7 @@ export function useProjectActions() {
     setEdges,
     setAnalysisProgress,
     clearAnalysisErrors,
-    panels,
-    toggleAnalysisPanel,
+    setAllFiles,
   } = useAppStore()
 
   // Default analysis progress state for resetting
@@ -62,6 +61,11 @@ export function useProjectActions() {
       clearAnalysisErrors()
       setAnalysisProgress(defaultAnalysisProgress)
 
+      // Load ALL project files for the sidebar (async, non-blocking)
+      api.listProjectFiles(project.id)
+        .then(setAllFiles)
+        .catch(err => console.error('Failed to load project files:', err))
+
       setIsLoading(false)
       return project
     } catch (err) {
@@ -70,7 +74,7 @@ export function useProjectActions() {
       setIsLoading(false)
       throw err
     }
-  }, [setCurrentProject, addRecentProject, setFiles, setSymbols, setNodes, setEdges, clearAnalysisErrors, setAnalysisProgress])
+  }, [setCurrentProject, addRecentProject, setFiles, setSymbols, setNodes, setEdges, clearAnalysisErrors, setAnalysisProgress, setAllFiles])
 
   /**
    * Open project from a path (e.g., from drag-and-drop)
@@ -92,6 +96,11 @@ export function useProjectActions() {
       clearAnalysisErrors()
       setAnalysisProgress(defaultAnalysisProgress)
 
+      // Load ALL project files for the sidebar (async, non-blocking)
+      api.listProjectFiles(project.id)
+        .then(setAllFiles)
+        .catch(err => console.error('Failed to load project files:', err))
+
       setIsLoading(false)
       return project
     } catch (err) {
@@ -100,7 +109,7 @@ export function useProjectActions() {
       setIsLoading(false)
       throw err
     }
-  }, [setCurrentProject, addRecentProject, setFiles, setSymbols, setNodes, setEdges, clearAnalysisErrors, setAnalysisProgress])
+  }, [setCurrentProject, addRecentProject, setFiles, setSymbols, setNodes, setEdges, clearAnalysisErrors, setAnalysisProgress, setAllFiles])
 
   /**
    * Start analysis for current project
@@ -115,11 +124,6 @@ export function useProjectActions() {
     // Clear old graph immediately so user sees fresh state
     setNodes([])
     setEdges([])
-
-    // Auto-open the analysis panel when analysis starts
-    if (!panels.analysisPanelOpen) {
-      toggleAnalysisPanel()
-    }
 
     try {
       // This now returns immediately after validation - analysis runs in background
@@ -168,7 +172,7 @@ export function useProjectActions() {
       setIsLoading(false)
       throw err
     }
-  }, [setAnalysisProgress, setNodes, setEdges, setFiles, clearAnalysisErrors, panels.analysisPanelOpen, toggleAnalysisPanel])
+  }, [setAnalysisProgress, setNodes, setEdges, setFiles, clearAnalysisErrors])
 
   /**
    * Cancel ongoing analysis
@@ -246,6 +250,12 @@ export function useProjectActions() {
     setSymbols([])
     setNodes([])
     setEdges([])
+    setAllFiles([])
+
+    // Load ALL project files for the sidebar (async, non-blocking)
+    api.listProjectFiles(project.id)
+      .then(setAllFiles)
+      .catch(err => console.error('Failed to load project files:', err))
 
     // If project was analyzed, load graph data and set complete status
     if (project.lastAnalyzedAt) {
@@ -291,7 +301,7 @@ export function useProjectActions() {
       // Project not analyzed yet - reset to idle
       setAnalysisProgress(defaultAnalysisProgress)
     }
-  }, [setCurrentProject, setFiles, setSymbols, setNodes, setEdges, setAnalysisProgress])
+  }, [setCurrentProject, setFiles, setSymbols, setNodes, setEdges, setAnalysisProgress, setAllFiles])
 
   return {
     isLoading,

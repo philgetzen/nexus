@@ -1,5 +1,4 @@
 export { ProjectSelector } from './ProjectSelector'
-export { AnalysisPanel } from './AnalysisPanel'
 export { ContextMenu, type ContextMenuProps } from './ContextMenu'
 export { FileTree } from './FileTree'
 export { DropZone, SimpleDropZone } from './DropZone'

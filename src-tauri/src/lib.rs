@@ -63,6 +63,7 @@ pub fn run() {
             commands::list_projects,
             commands::get_project,
             commands::delete_project,
+            commands::list_project_files,
             commands::start_analysis,
             commands::cancel_analysis,
             commands::get_graph_data,

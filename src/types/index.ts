@@ -109,22 +109,29 @@ export interface Cluster {
  * Supported programming languages
  */
 export type Language =
+  // Full parsing support
   | 'swift'
   | 'typescript'
   | 'javascript'
   | 'python'
   | 'go'
   | 'rust'
+  | 'c'
+  // Discovery-only (included in graph but no symbol extraction)
+  | 'json'
+  | 'yaml'
+  | 'markdown'
+  | 'html'
+  | 'css'
+  | 'plist'
+  | 'shell'
+  // Legacy/placeholder (kept for compatibility)
   | 'java'
   | 'kotlin'
-  | 'c'
   | 'cpp'
   | 'csharp'
   | 'ruby'
   | 'php'
-  | 'markdown'
-  | 'json'
-  | 'yaml'
   | 'unknown'
 
 /**
@@ -321,6 +328,4 @@ export type ViewMode = 'file' | 'symbol'
 export interface PanelState {
   sidebarOpen: boolean
   inspectorOpen: boolean
-  analysisPanelOpen: boolean
-  analysisPanelHeight: number
 }

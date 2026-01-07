@@ -80,6 +80,35 @@ export async function deleteProject(id: string): Promise<void> {
 }
 
 // =============================================================================
+// Project File Browser Commands
+// =============================================================================
+
+/**
+ * File type classification
+ */
+export type FileType = 'code' | 'image' | 'font' | 'config' | 'document' | 'other'
+
+/**
+ * A project file entry (ALL files, not just code)
+ */
+export interface ProjectFile {
+  id: string
+  name: string
+  path: string
+  absolutePath: string
+  fileType: FileType
+  size: number
+}
+
+/**
+ * List ALL files in a project directory (not just code files)
+ * Used for the sidebar file browser
+ */
+export async function listProjectFiles(projectId: string): Promise<ProjectFile[]> {
+  return invoke<ProjectFile[]>('list_project_files', { projectId })
+}
+
+// =============================================================================
 // Analysis Commands
 // =============================================================================
 

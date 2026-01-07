@@ -5,13 +5,14 @@ import {
   Folder,
   FolderOpen,
   FileCode,
-  FileJson,
   FileText,
   File as FileIcon,
-  EyeOff,
+  Image,
+  Type,
+  Settings,
 } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
-import type { File, Language, GraphNode } from '@/types'
+import type { ProjectFile, FileType } from '@/lib/tauri'
 
 // =============================================================================
 // Types
@@ -22,8 +23,7 @@ interface TreeNode {
   path: string
   isDirectory: boolean
   children: TreeNode[]
-  file?: File
-  graphNode?: GraphNode
+  file?: ProjectFile
 }
 
 interface FileTreeProps {
@@ -39,9 +39,8 @@ interface FileTreeProps {
 /**
  * Build a tree structure from a flat list of files
  */
-function buildTree(files: File[], nodes: GraphNode[]): TreeNode[] {
+function buildTree(files: ProjectFile[]): TreeNode[] {
   const root: Map<string, TreeNode> = new Map()
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
 
   for (const file of files) {
     const parts = file.path.split('/')
@@ -59,7 +58,6 @@ function buildTree(files: File[], nodes: GraphNode[]): TreeNode[] {
           isDirectory: !isLast,
           children: [],
           file: isLast ? file : undefined,
-          graphNode: isLast ? nodeMap.get(file.id) : undefined,
         }
         currentLevel.set(part, node)
       }
@@ -101,33 +99,32 @@ function buildTree(files: File[], nodes: GraphNode[]): TreeNode[] {
 }
 
 /**
- * Get icon component for a language
+ * Get icon component for a file type
  */
-function getLanguageIcon(language: Language): React.ReactNode {
-  switch (language) {
-    case 'typescript':
-    case 'javascript':
-    case 'swift':
-    case 'python':
-    case 'go':
-    case 'rust':
-    case 'java':
-    case 'kotlin':
-    case 'c':
-    case 'cpp':
-    case 'csharp':
-    case 'ruby':
-    case 'php':
+function getFileTypeIcon(fileType: FileType): React.ReactNode {
+  switch (fileType) {
+    case 'code':
       return <FileCode className="w-4 h-4 text-blue-500" />
-    case 'json':
-      return <FileJson className="w-4 h-4 text-yellow-500" />
-    case 'markdown':
-      return <FileText className="w-4 h-4 text-zinc-500" />
-    case 'yaml':
-      return <FileText className="w-4 h-4 text-purple-500" />
+    case 'image':
+      return <Image className="w-4 h-4 text-rose-500" />
+    case 'font':
+      return <Type className="w-4 h-4 text-purple-500" />
+    case 'config':
+      return <Settings className="w-4 h-4 text-amber-500" />
+    case 'document':
+      return <FileText className="w-4 h-4 text-emerald-500" />
     default:
       return <FileIcon className="w-4 h-4 text-zinc-400" />
   }
+}
+
+/**
+ * Format file size for display
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
 
 // =============================================================================
@@ -157,7 +154,6 @@ function FileTreeNode({
 }: FileTreeNodeProps) {
   const isExpanded = expandedPaths.has(node.path)
   const isSelected = node.file?.id === selectedId
-  const isHidden = node.file?.isHidden || false
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -193,7 +189,7 @@ function FileTreeNode({
           isSelected
             ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-900 dark:text-violet-100'
             : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'
-        } ${isHidden ? 'opacity-50' : ''}`}
+        }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         {/* Expand/collapse icon */}
@@ -218,20 +214,17 @@ function FileTreeNode({
               <Folder className="w-4 h-4 text-amber-500" />
             )
           ) : (
-            node.file && getLanguageIcon(node.file.language)
+            node.file && getFileTypeIcon(node.file.fileType)
           )}
         </span>
 
         {/* Name */}
         <span className="flex-1 truncate">{node.name}</span>
 
-        {/* Hidden indicator */}
-        {isHidden && <EyeOff className="w-3 h-3 text-zinc-400 flex-shrink-0" />}
-
-        {/* Line count for files */}
+        {/* File size for files */}
         {!node.isDirectory && node.file && (
           <span className="text-xs text-zinc-400 flex-shrink-0">
-            {node.file.lineCount}L
+            {formatFileSize(node.file.size)}
           </span>
         )}
       </button>
@@ -267,12 +260,12 @@ export function FileTree({
   onNodeDoubleClick,
   onContextMenu,
 }: FileTreeProps) {
-  const { files, nodes, selectedNodeId, selectNode, currentProject } = useAppStore()
+  const { allFiles, selectedNodeId, selectNode, currentProject } = useAppStore()
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [searchFilter, setSearchFilter] = useState('')
 
-  // Build tree structure from files
-  const tree = useMemo(() => buildTree(files, nodes), [files, nodes])
+  // Build tree structure from all files
+  const tree = useMemo(() => buildTree(allFiles), [allFiles])
 
   // Filter tree by search
   const filteredTree = useMemo(() => {
@@ -365,15 +358,15 @@ export function FileTree({
     )
   }
 
-  if (files.length === 0) {
+  if (allFiles.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-        <FileCode className="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" />
+        <Folder className="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" />
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          No files analyzed
+          Loading files...
         </p>
         <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-          Run analysis to see the file tree
+          Project files will appear here
         </p>
       </div>
     )
@@ -431,7 +424,7 @@ export function FileTree({
 
       {/* Footer with stats */}
       <div className="px-3 py-2 text-xs text-zinc-500 border-t border-zinc-200 dark:border-zinc-700">
-        {files.length} files
+        {allFiles.length.toLocaleString()} files
       </div>
     </div>
   )

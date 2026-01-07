@@ -72,7 +72,6 @@ export function GraphCanvas({
     nodes: filteredNodes,
     edges: filteredEdges,
     searchMatchIds,
-    stats,
     hasSearchQuery,
   } = useFilteredGraph()
 
@@ -105,6 +104,12 @@ export function GraphCanvas({
   // Track if layout has been applied to prevent re-running
   const layoutAppliedRef = useRef<{ algorithm: string; nodeIds: string } | null>(null)
 
+  // Track if we've auto-fitted for this graph
+  const autoFitAppliedRef = useRef<string | null>(null)
+
+  // Track layout completion for auto-fit timing
+  const [layoutComplete, setLayoutComplete] = useState(false)
+
   // Apply layout based on selected algorithm
   useEffect(() => {
     if (allNodes.length === 0) return
@@ -125,6 +130,8 @@ export function GraphCanvas({
       layoutAppliedRef.current.nodeIds === nodeIdSample &&
       hasPositions
     ) {
+      // Still mark as complete so auto-fit can run
+      setLayoutComplete(true)
       return
     }
 
@@ -134,29 +141,14 @@ export function GraphCanvas({
       simulationRef.current = null
     }
 
-    // Mark layout as being applied
+    // Mark layout as being applied and reset auto-fit
     layoutAppliedRef.current = { algorithm: layoutAlgorithm, nodeIds: nodeIdSample }
+    autoFitAppliedRef.current = null
+    setLayoutComplete(false)
 
     // Create lookup map for O(1) node access (critical for performance with large graphs)
     const nodeMap = new Map(allNodes.map((n) => [n.id, n]))
     const nodeCount = allNodes.length
-
-    // For very large graphs, use simple O(n) grid layout instead of O(n²) D3 simulation
-    if (nodeCount > 200 && layoutAlgorithm === 'force-directed') {
-      const cols = Math.ceil(Math.sqrt(nodeCount))
-      const spacing = { x: 80, y: 60 }
-      const offset = { x: 100, y: 100 }
-
-      const gridNodes: GraphNodeType[] = allNodes.map((node, i) => ({
-        ...node,
-        position: {
-          x: (i % cols) * spacing.x + offset.x,
-          y: Math.floor(i / cols) * spacing.y + offset.y,
-        },
-      }))
-      setNodes(gridNodes)
-      return // Skip D3 simulation entirely for large graphs
-    }
 
     if (layoutAlgorithm === 'force-directed') {
       // Force-directed layout using D3-force
@@ -172,10 +164,10 @@ export function GraphCanvas({
         target: e.target,
       }))
 
-      // Adjust forces for large graphs (nodeCount already defined above)
-      const chargeStrength = nodeCount > 500 ? -100 : -300
-      const linkDistance = nodeCount > 500 ? 50 : 100
-      const collideRadius = nodeCount > 500 ? 20 : 50
+      // Adjust forces for large graphs - keep them compact
+      const chargeStrength = nodeCount > 1000 ? -30 : nodeCount > 500 ? -50 : -300
+      const linkDistance = nodeCount > 1000 ? 20 : nodeCount > 500 ? 30 : 100
+      const collideRadius = nodeCount > 1000 ? 8 : nodeCount > 500 ? 15 : 50
 
       const simulation = forceSimulation<SimNode>(simNodes)
         .force(
@@ -227,6 +219,7 @@ export function GraphCanvas({
               }
             })
             setNodes(finalNodes)
+            setLayoutComplete(true)
           }
         }
 
@@ -250,6 +243,10 @@ export function GraphCanvas({
             }
           })
           setNodes(updatedNodes)
+        })
+
+        simulation.on('end', () => {
+          setLayoutComplete(true)
         })
 
         simulation.alpha(1).restart()
@@ -293,6 +290,7 @@ export function GraphCanvas({
         }
       })
       setNodes(updatedNodes)
+      setLayoutComplete(true)
     } else if (layoutAlgorithm === 'radial') {
       // Radial layout - arrange nodes in concentric circles
       // Find root nodes (nodes with no incoming edges)
@@ -391,6 +389,7 @@ export function GraphCanvas({
       })
 
       setNodes(updatedNodes)
+      setLayoutComplete(true)
     }
 
     return () => {
@@ -522,20 +521,95 @@ export function GraphCanvas({
     setIsPanning(false)
   }
 
-  // Zoom handlers
+  // Zoom handlers - allow zooming out to 1% for very large/spread out graphs
   const handleZoomIn = () => setZoomLevel(Math.min(zoomLevel * 1.2, 400))
-  const handleZoomOut = () => setZoomLevel(Math.max(zoomLevel / 1.2, 25))
-  const handleFitToView = () => {
-    setZoomLevel(100)
-    setPanX(0)
-    setPanY(0)
-  }
+  const handleZoomOut = () => setZoomLevel(Math.max(zoomLevel / 1.2, 1))
 
-  // Scroll wheel zoom
+  // Calculate and apply fit-to-view
+  const handleFitToView = useCallback(() => {
+    if (filteredNodes.length === 0) {
+      setZoomLevel(100)
+      setPanX(0)
+      setPanY(0)
+      return
+    }
+
+    // Calculate bounding box of all nodes
+    let minX = Infinity, maxX = -Infinity
+    let minY = Infinity, maxY = -Infinity
+
+    filteredNodes.forEach((node) => {
+      const x = node.position?.x ?? 0
+      const y = node.position?.y ?? 0
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    })
+
+    // Add padding
+    const padding = 100
+    minX -= padding
+    maxX += padding
+    minY -= padding
+    maxY += padding
+
+    const graphWidth = maxX - minX
+    const graphHeight = maxY - minY
+
+    // Calculate zoom to fit - allow very low zoom for large/spread graphs
+    const zoomX = width / graphWidth
+    const zoomY = height / graphHeight
+    const newZoom = Math.min(zoomX, zoomY, 1) * 100 // Cap at 100% max (don't zoom in past 100%)
+    const clampedZoom = Math.max(1, Math.min(100, newZoom)) // Allow down to 1% for spread out graphs
+
+    // Center the view on the graph
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
+    const viewWidth = width / (clampedZoom / 100)
+    const viewHeight = height / (clampedZoom / 100)
+
+    setZoomLevel(clampedZoom)
+    setPanX(centerX - viewWidth / 2)
+    setPanY(centerY - viewHeight / 2)
+  }, [filteredNodes, width, height, setZoomLevel])
+
+  // Compute stable fingerprint for auto-fit tracking
+  const nodesFingerprint = useMemo(() => {
+    if (filteredNodes.length === 0) return ''
+    const hasPositions = filteredNodes.some(n => n.position?.x !== undefined)
+    const firstNodePos = filteredNodes[0]?.position
+    return `${filteredNodes.length}-${hasPositions}-${firstNodePos?.x?.toFixed(0) ?? 'none'}`
+  }, [filteredNodes])
+
+  // Auto-fit when layout completes or nodes get positions
+  useEffect(() => {
+    if (filteredNodes.length === 0) return
+
+    // Check if nodes have positions
+    const hasPositions = filteredNodes.some(n => n.position?.x !== undefined)
+    if (!hasPositions) return
+
+    // Create a fingerprint to detect new graph data
+    const fingerprint = `${nodesFingerprint}-${layoutAlgorithm}`
+
+    // Only auto-fit once per unique fingerprint
+    if (autoFitAppliedRef.current === fingerprint) return
+
+    // Delay to ensure layout has settled
+    const timer = setTimeout(() => {
+      autoFitAppliedRef.current = fingerprint
+      handleFitToView()
+    }, 150)
+
+    return () => clearTimeout(timer)
+  }, [nodesFingerprint, layoutAlgorithm, handleFitToView, filteredNodes])
+
+  // Scroll wheel zoom - allow zooming out to 1% for spread out graphs
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault()
     const delta = e.deltaY > 0 ? 0.9 : 1.1 // Zoom out or in
-    const newZoom = Math.max(25, Math.min(400, zoomLevel * delta))
+    const newZoom = Math.max(1, Math.min(400, zoomLevel * delta))
     setZoomLevel(newZoom)
   }
 
@@ -640,41 +714,14 @@ export function GraphCanvas({
         )}
       </svg>
 
-      {/* Top controls */}
+      {/* Top-left: View mode and Layout controls */}
       <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
         <ViewModeSwitcher viewMode={viewMode} onViewModeChange={setViewMode} />
         <LayoutSwitcher layout={layoutAlgorithm} onLayoutChange={setLayoutAlgorithm} />
       </div>
 
-      {/* Bottom-left: Stats */}
-      <div className="absolute bottom-4 left-4 z-20 bg-zinc-900/80 backdrop-blur-sm border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-400 flex items-center gap-4">
-        <span>
-          <strong className="text-zinc-200">{stats.visibleNodes}</strong>
-          {stats.hasActiveFilters && <span className="text-zinc-500">/{stats.totalNodes}</span>} nodes
-        </span>
-        <span>
-          <strong className="text-zinc-200">{stats.visibleEdges}</strong>
-          {stats.hasActiveFilters && <span className="text-zinc-500">/{stats.totalEdges}</span>} edges
-        </span>
-        {stats.searchMatches > 0 && (
-          <span className="text-yellow-400">
-            <strong>{stats.searchMatches}</strong> matches
-          </span>
-        )}
-      </div>
-
-      {/* Bottom-right: Zoom controls */}
-      <div className="absolute bottom-4 right-4 z-20">
-        <ZoomControls
-          zoom={zoomLevel}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onFitToView={handleFitToView}
-        />
-      </div>
-
-      {/* Top-right: Minimap */}
-      <div className="absolute top-4 right-4">
+      {/* Bottom-right: MiniMap + Zoom controls combined */}
+      <div className="absolute bottom-4 right-4 z-20 flex items-end gap-2">
         <MiniMap
           nodes={filteredNodes.map((n) => ({ ...n, state: getNodeState(n.id) }))}
           edges={filteredEdges}
@@ -684,6 +731,12 @@ export function GraphCanvas({
           viewportHeight={height}
           zoom={zoomLevel}
           onNavigate={handleMinimapNavigate}
+        />
+        <ZoomControls
+          zoom={zoomLevel}
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onFitToView={handleFitToView}
         />
       </div>
 

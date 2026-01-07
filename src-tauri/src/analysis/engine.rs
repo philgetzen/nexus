@@ -308,11 +308,8 @@ impl AnalysisEngine {
             .to_string_lossy()
             .to_string();
 
-        // Parse file
-        let parse_result = self.parser.parse_file(&file_id, language, &source)?;
-
         let file = FileRecord {
-            id: file_id,
+            id: file_id.clone(),
             project_id: project_id.to_string(),
             name: file_name.to_string(),
             path: relative_path,
@@ -323,6 +320,15 @@ impl AnalysisEngine {
             content_hash: Some(calculate_hash(&source)),
             last_modified: None,
         };
+
+        // For non-parseable languages (Swift, JSON, YAML, etc.), just return the file record
+        // without symbol extraction
+        if !language.requires_parsing() {
+            return Ok((file, vec![], vec![]));
+        }
+
+        // Parse file with tree-sitter for full symbol extraction
+        let parse_result = self.parser.parse_file(&file_id, language, &source)?;
 
         Ok((file, parse_result.symbols, parse_result.imports))
     }
@@ -387,6 +393,14 @@ fn calculate_hash(content: &str) -> String {
     format!("{:x}", hasher.finish())
 }
 
+/// Extensions to try when resolving imports
+/// Includes code files and config files that code might import
+const IMPORT_EXTENSIONS: &[&str] = &[
+    "", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".c", ".h", ".swift",
+    // Config files that code might import
+    ".json", ".yaml", ".yml", ".md", ".html", ".css", ".scss", ".plist",
+];
+
 /// Resolve an import path to a file ID
 fn resolve_import<'a>(
     import_source: &str,
@@ -400,7 +414,7 @@ fn resolve_import<'a>(
         let import_path = current_dir.join(import_source);
 
         // Try with common extensions
-        for ext in &["", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".c", ".h"] {
+        for ext in IMPORT_EXTENSIONS {
             let path_with_ext = if ext.is_empty() {
                 import_path.to_string_lossy().to_string()
             } else {
@@ -426,7 +440,7 @@ fn resolve_import<'a>(
         .file_name()
         .and_then(|n| n.to_str())?;
 
-    for ext in &["", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".c", ".h"] {
+    for ext in IMPORT_EXTENSIONS {
         let name_with_ext = if ext.is_empty() {
             file_name.to_string()
         } else {
@@ -450,16 +464,19 @@ mod tests {
     fn test_discover_files() {
         let dir = tempdir().unwrap();
 
-        // Create test files
+        // Create test files - all supported languages
         fs::write(dir.path().join("test.ts"), "const x = 1;").unwrap();
         fs::write(dir.path().join("test.py"), "x = 1").unwrap();
         fs::write(dir.path().join("readme.md"), "# Readme").unwrap();
+        fs::write(dir.path().join("config.json"), "{}").unwrap();
+        fs::write(dir.path().join("styles.css"), "body {}").unwrap();
+        fs::write(dir.path().join("unknown.xyz"), "unknown").unwrap();
 
         let engine = AnalysisEngine::new();
         let files = engine.discover_files(dir.path(), &|_| {}).unwrap();
 
-        // Should find .ts and .py but not .md
-        assert_eq!(files.len(), 2);
+        // Should find .ts, .py, .md, .json, .css but NOT .xyz
+        assert_eq!(files.len(), 5);
     }
 
     #[test]

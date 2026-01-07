@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" fill="#7c3aed" rx="6"/>
-  <text x="16" y="22" font-family="Arial" font-size="16" font-weight="bold" fill="white" text-anchor="middle">N</text>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- macOS icons need ~10% padding around the icon content -->
+  <rect x="102" y="102" width="820" height="820" fill="#7c3aed" rx="180"/>
+  <text x="512" y="620" font-family="Arial, Helvetica, sans-serif" font-size="500" font-weight="bold" fill="white" text-anchor="middle">N</text>
 </svg>
