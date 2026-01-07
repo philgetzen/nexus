@@ -1,0 +1,110 @@
+@import 'tailwindcss';
+
+/* Design Tokens */
+:root {
+  /* Typography */
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Primary: Violet */
+  --primary-50: #f5f3ff;
+  --primary-100: #ede9fe;
+  --primary-200: #ddd6fe;
+  --primary-300: #c4b5fd;
+  --primary-400: #a78bfa;
+  --primary-500: #8b5cf6;
+  --primary-600: #7c3aed;
+  --primary-700: #6d28d9;
+  --primary-800: #5b21b6;
+  --primary-900: #4c1d95;
+  --primary-950: #2e1065;
+
+  /* Secondary: Cyan */
+  --secondary-50: #ecfeff;
+  --secondary-100: #cffafe;
+  --secondary-200: #a5f3fc;
+  --secondary-300: #67e8f9;
+  --secondary-400: #22d3ee;
+  --secondary-500: #06b6d4;
+  --secondary-600: #0891b2;
+  --secondary-700: #0e7490;
+  --secondary-800: #155e75;
+  --secondary-900: #164e63;
+  --secondary-950: #083344;
+
+  /* Neutral: Zinc */
+  --neutral-50: #fafafa;
+  --neutral-100: #f4f4f5;
+  --neutral-200: #e4e4e7;
+  --neutral-300: #d4d4d8;
+  --neutral-400: #a1a1aa;
+  --neutral-500: #71717a;
+  --neutral-600: #52525b;
+  --neutral-700: #3f3f46;
+  --neutral-800: #27272a;
+  --neutral-900: #18181b;
+  --neutral-950: #09090b;
+
+  /* Panel dimensions */
+  --sidebar-width: 280px;
+  --inspector-width: 320px;
+  --toolbar-height: 48px;
+  --panel-min-height: 200px;
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  background-color: var(--neutral-900);
+  color: var(--neutral-100);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Code/mono text */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--neutral-800);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-600);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-500);
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background-color: var(--primary-600);
+  color: white;
+}
