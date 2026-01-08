@@ -53,6 +53,14 @@ pub fn run() {
             let state = AppState::new(repository);
             app.manage(state);
 
+            // Open devtools in debug mode
+            #[cfg(debug_assertions)]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
+            }
+
             tracing::info!("Nexus setup complete");
             Ok(())
         })

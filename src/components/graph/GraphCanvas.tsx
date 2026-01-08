@@ -75,11 +75,20 @@ export function GraphCanvas({
     hasSearchQuery,
   } = useFilteredGraph()
 
-  // Pan state
+  // Pan state - use refs during drag for performance, sync to state on release
   const [panX, setPanX] = useState(0)
   const [panY, setPanY] = useState(0)
-  const [isPanning, setIsPanning] = useState(false)
+  const isPanningRef = useRef(false) // Use ref to avoid re-renders during pan
   const lastPanPos = useRef({ x: 0, y: 0 })
+  const panRef = useRef({ x: 0, y: 0 })
+
+  // Track if user is actively interacting (zoom/pan) - prevents React from overwriting DOM viewBox
+  const isInteractingRef = useRef(false)
+  // Skip the next state→DOM sync (used after interaction ends to prevent jump)
+  const skipNextSyncRef = useRef(false)
+
+  // Track if view is ready (auto-fit has been applied)
+  const [isViewReady, setIsViewReady] = useState(false)
 
   // Create file and symbol lookup maps
   const fileMap = useMemo(
@@ -89,6 +98,12 @@ export function GraphCanvas({
   const symbolMap = useMemo(
     () => Object.fromEntries(symbols.map((s) => [s.id, s])),
     [symbols]
+  )
+
+  // Create node lookup map for O(1) access during edge rendering
+  const nodeMap = useMemo(
+    () => new Map(filteredNodes.map((n) => [n.id, n])),
+    [filteredNodes]
   )
 
   // Calculate connection counts for sizing (based on filtered edges)
@@ -107,31 +122,31 @@ export function GraphCanvas({
   // Track if we've auto-fitted for this graph
   const autoFitAppliedRef = useRef<string | null>(null)
 
-  // Track layout completion for auto-fit timing
-  const [layoutComplete, setLayoutComplete] = useState(false)
-
   // Apply layout based on selected algorithm
   useEffect(() => {
-    if (allNodes.length === 0) return
+    console.log('[Layout] Effect triggered - allNodes:', allNodes.length, 'viewMode:', viewMode)
 
-    // Create a fingerprint of node IDs to detect when we have new/different nodes
-    // Use first 10 + last 10 node IDs for efficiency
-    const nodeIdSample = [
-      ...allNodes.slice(0, 10).map(n => n.id),
-      ...allNodes.slice(-10).map(n => n.id),
-    ].join(',')
+    if (allNodes.length === 0) {
+      console.log('[Layout] Early return - no nodes')
+      return
+    }
 
-    // Skip if layout already applied for this algorithm and same nodes
-    // But always re-run if nodes don't have positions (fresh from backend)
+    // Create a fingerprint based on node count and first/last node IDs
+    const nodeFingerprint = `${allNodes.length}-${allNodes[0]?.id}-${allNodes[allNodes.length - 1]?.id}`
+    console.log('[Layout] Fingerprint:', nodeFingerprint)
+
+    // Skip if layout already applied for this exact configuration
+    // But always re-run if nodes don't have positions
     const hasPositions = allNodes[0]?.position?.x !== undefined
+    console.log('[Layout] hasPositions:', hasPositions, 'layoutApplied:', layoutAppliedRef.current)
+
     if (
       layoutAppliedRef.current &&
       layoutAppliedRef.current.algorithm === layoutAlgorithm &&
-      layoutAppliedRef.current.nodeIds === nodeIdSample &&
+      layoutAppliedRef.current.nodeIds === nodeFingerprint &&
       hasPositions
     ) {
-      // Still mark as complete so auto-fit can run
-      setLayoutComplete(true)
+      console.log('[Layout] Skipping - already applied for this config')
       return
     }
 
@@ -142,13 +157,18 @@ export function GraphCanvas({
     }
 
     // Mark layout as being applied and reset auto-fit
-    layoutAppliedRef.current = { algorithm: layoutAlgorithm, nodeIds: nodeIdSample }
+    layoutAppliedRef.current = { algorithm: layoutAlgorithm, nodeIds: nodeFingerprint }
     autoFitAppliedRef.current = null
-    setLayoutComplete(false)
+    setIsViewReady(false) // Hide view until auto-fit completes
 
     // Create lookup map for O(1) node access (critical for performance with large graphs)
     const nodeMap = new Map(allNodes.map((n) => [n.id, n]))
     const nodeCount = allNodes.length
+
+    // Filter edges to only include those where both source and target exist in current nodes
+    const nodeIds = new Set(allNodes.map((n) => n.id))
+    const validEdges = allEdges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+    console.log('[Layout] Valid edges:', validEdges.length, 'of', allEdges.length)
 
     if (layoutAlgorithm === 'force-directed') {
       // Force-directed layout using D3-force
@@ -158,7 +178,7 @@ export function GraphCanvas({
         y: n.position?.y ?? height / 2 + (Math.random() - 0.5) * 200,
       }))
 
-      const simLinks: SimLink[] = allEdges.map((e) => ({
+      const simLinks: SimLink[] = validEdges.map((e) => ({
         id: e.id,
         source: e.source,
         target: e.target,
@@ -219,7 +239,6 @@ export function GraphCanvas({
               }
             })
             setNodes(finalNodes)
-            setLayoutComplete(true)
           }
         }
 
@@ -245,9 +264,6 @@ export function GraphCanvas({
           setNodes(updatedNodes)
         })
 
-        simulation.on('end', () => {
-          setLayoutComplete(true)
-        })
 
         simulation.alpha(1).restart()
       }
@@ -257,20 +273,22 @@ export function GraphCanvas({
       // Hierarchical (tree) layout using dagre
       const g = new dagre.graphlib.Graph()
 
-      // Adjust spacing for large graphs (nodeCount already defined above)
-      const nodesep = nodeCount > 500 ? 30 : 80
-      const ranksep = nodeCount > 500 ? 50 : 100
+      // Adjust spacing for large graphs - make very compact for 1000+ nodes
+      const nodesep = nodeCount > 1000 ? 5 : nodeCount > 500 ? 15 : 80
+      const ranksep = nodeCount > 1000 ? 15 : nodeCount > 500 ? 30 : 100
+      const nodeWidth = nodeCount > 1000 ? 20 : 60
+      const nodeHeight = nodeCount > 1000 ? 10 : 30
 
       g.setGraph({ rankdir: 'TB', nodesep, ranksep })
       g.setDefaultEdgeLabel(() => ({}))
 
       // Add nodes
       allNodes.forEach((node) => {
-        g.setNode(node.id, { width: 60, height: 30 })
+        g.setNode(node.id, { width: nodeWidth, height: nodeHeight })
       })
 
       // Add edges
-      allEdges.forEach((edge) => {
+      validEdges.forEach((edge) => {
         g.setEdge(edge.source, edge.target)
       })
 
@@ -290,11 +308,10 @@ export function GraphCanvas({
         }
       })
       setNodes(updatedNodes)
-      setLayoutComplete(true)
     } else if (layoutAlgorithm === 'radial') {
       // Radial layout - arrange nodes in concentric circles
       // Find root nodes (nodes with no incoming edges)
-      const hasIncoming = new Set(allEdges.map((e) => e.target))
+      const hasIncoming = new Set(validEdges.map((e) => e.target))
       const rootNodes = allNodes.filter((n) => !hasIncoming.has(n.id))
       const centerX = width / 2
       const centerY = height / 2
@@ -321,7 +338,7 @@ export function GraphCanvas({
 
       // Build edge lookup for faster BFS traversal
       const outgoingEdges = new Map<string, string[]>()
-      allEdges.forEach((e) => {
+      validEdges.forEach((e) => {
         if (!outgoingEdges.has(e.source)) {
           outgoingEdges.set(e.source, [])
         }
@@ -389,7 +406,6 @@ export function GraphCanvas({
       })
 
       setNodes(updatedNodes)
-      setLayoutComplete(true)
     }
 
     return () => {
@@ -397,6 +413,7 @@ export function GraphCanvas({
         simulationRef.current.stop()
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- using fingerprint to track node changes
   }, [allNodes.length, allEdges.length, width, height, layoutAlgorithm, setNodes])
 
   // Get node state based on selection and search
@@ -424,6 +441,12 @@ export function GraphCanvas({
       return 'default'
     },
     [selectedNodeId, hoveredNodeId, filteredEdges, hasSearchQuery, searchMatchIds]
+  )
+
+  // Memoize minimap nodes array to prevent MiniMap re-renders
+  const minimapNodes = useMemo(
+    () => filteredNodes.map((n) => ({ ...n, state: getNodeState(n.id) })),
+    [filteredNodes, getNodeState]
   )
 
   // Check if edge is highlighted
@@ -498,32 +521,76 @@ export function GraphCanvas({
     }
   }, [hoveredNodeId, selectedNodeId, filteredNodes, filteredEdges, fileMap, symbolMap])
 
-  // Pan handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0) {
-      // Left click
-      setIsPanning(true)
+  // Pan handlers - use refs during drag to avoid ALL re-renders
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 0 && svgRef.current) {
+      // Left click - use refs only, no state updates
+      isPanningRef.current = true
+      isInteractingRef.current = true  // Block state→DOM sync while panning
       lastPanPos.current = { x: e.clientX, y: e.clientY }
+      panRef.current = { x: panX, y: panY }
+      // Update cursor via DOM
+      svgRef.current.style.cursor = 'grabbing'
     }
-  }
+  }, [panX, panY])
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isPanning) {
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isPanningRef.current && svgRef.current) {
+      // Get actual SVG dimensions
+      const rect = svgRef.current.getBoundingClientRect()
+
       const dx = e.clientX - lastPanPos.current.x
       const dy = e.clientY - lastPanPos.current.y
-      setPanX((prev) => prev - dx / (zoomLevel / 100))
-      setPanY((prev) => prev - dy / (zoomLevel / 100))
-      lastPanPos.current = { x: e.clientX, y: e.clientY }
-    }
-  }
 
-  const handleMouseUp = () => {
-    setIsPanning(false)
-  }
+      // Convert screen pixels to viewBox units
+      // At 100% zoom, 1 screen pixel = 1 viewBox unit
+      // At 50% zoom, 1 screen pixel = 2 viewBox units (viewBox is 2x larger)
+      panRef.current.x -= dx / (zoomLevel / 100)
+      panRef.current.y -= dy / (zoomLevel / 100)
+      lastPanPos.current = { x: e.clientX, y: e.clientY }
+
+      // Direct DOM update on viewBox - use actual SVG dimensions
+      const viewBoxWidth = rect.width / (zoomLevel / 100)
+      const viewBoxHeight = rect.height / (zoomLevel / 100)
+      svgRef.current.setAttribute('viewBox',
+        `${panRef.current.x} ${panRef.current.y} ${viewBoxWidth} ${viewBoxHeight}`)
+    }
+  }, [zoomLevel])
+
+  const handleMouseUp = useCallback(() => {
+    if (isPanningRef.current && svgRef.current) {
+      isPanningRef.current = false
+      isInteractingRef.current = false
+      skipNextSyncRef.current = true  // Skip the sync since DOM already has correct values
+      // Sync final position to state on release (single re-render)
+      setPanX(panRef.current.x)
+      setPanY(panRef.current.y)
+      // Restore cursor
+      svgRef.current.style.cursor = 'grab'
+    }
+  }, [])
+
+  // Stable node event handlers to prevent re-renders
+  const handleNodeHover = useCallback((id: string) => {
+    hoverNode(id)
+  }, [hoverNode])
+
+  const handleNodeHoverEnd = useCallback((_id: string) => {
+    hoverNode(null)
+  }, [hoverNode])
+
+  const handleNodeClick = useCallback((id: string) => {
+    selectNode(id)
+  }, [selectNode])
+
+  const handleNodeDoubleClick = useCallback((id: string) => {
+    // TODO: Open in editor via Tauri
+    console.log('Open in editor:', id)
+  }, [])
 
   // Zoom handlers - allow zooming out to 1% for very large/spread out graphs
-  const handleZoomIn = () => setZoomLevel(Math.min(zoomLevel * 1.2, 400))
-  const handleZoomOut = () => setZoomLevel(Math.max(zoomLevel / 1.2, 1))
+  const handleZoomIn = useCallback(() => setZoomLevel(Math.min(zoomLevel * 1.2, 400)), [zoomLevel, setZoomLevel])
+  const handleZoomOut = useCallback(() => setZoomLevel(Math.max(zoomLevel / 1.2, 1)), [zoomLevel, setZoomLevel])
 
   // Calculate and apply fit-to-view
   const handleFitToView = useCallback(() => {
@@ -533,6 +600,11 @@ export function GraphCanvas({
       setPanY(0)
       return
     }
+
+    // Get actual SVG dimensions (fall back to props if not available)
+    const rect = svgRef.current?.getBoundingClientRect()
+    const svgWidth = rect?.width || width
+    const svgHeight = rect?.height || height
 
     // Calculate bounding box of all nodes
     let minX = Infinity, maxX = -Infinity
@@ -558,60 +630,152 @@ export function GraphCanvas({
     const graphHeight = maxY - minY
 
     // Calculate zoom to fit - allow very low zoom for large/spread graphs
-    const zoomX = width / graphWidth
-    const zoomY = height / graphHeight
+    const zoomX = svgWidth / graphWidth
+    const zoomY = svgHeight / graphHeight
     const newZoom = Math.min(zoomX, zoomY, 1) * 100 // Cap at 100% max (don't zoom in past 100%)
     const clampedZoom = Math.max(1, Math.min(100, newZoom)) // Allow down to 1% for spread out graphs
 
     // Center the view on the graph
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
-    const viewWidth = width / (clampedZoom / 100)
-    const viewHeight = height / (clampedZoom / 100)
+    const viewWidth = svgWidth / (clampedZoom / 100)
+    const viewHeight = svgHeight / (clampedZoom / 100)
 
     setZoomLevel(clampedZoom)
     setPanX(centerX - viewWidth / 2)
     setPanY(centerY - viewHeight / 2)
   }, [filteredNodes, width, height, setZoomLevel])
 
-  // Compute stable fingerprint for auto-fit tracking
-  const nodesFingerprint = useMemo(() => {
-    if (filteredNodes.length === 0) return ''
-    const hasPositions = filteredNodes.some(n => n.position?.x !== undefined)
-    const firstNodePos = filteredNodes[0]?.position
-    return `${filteredNodes.length}-${hasPositions}-${firstNodePos?.x?.toFixed(0) ?? 'none'}`
-  }, [filteredNodes])
-
-  // Auto-fit when layout completes or nodes get positions
+  // Auto-fit when nodes change or layout completes
   useEffect(() => {
-    if (filteredNodes.length === 0) return
+    console.log('[AutoFit] Effect triggered - filteredNodes:', filteredNodes.length)
+
+    if (filteredNodes.length === 0) {
+      console.log('[AutoFit] Early return - no filtered nodes')
+      return
+    }
 
     // Check if nodes have positions
     const hasPositions = filteredNodes.some(n => n.position?.x !== undefined)
-    if (!hasPositions) return
+    console.log('[AutoFit] hasPositions:', hasPositions)
 
-    // Create a fingerprint to detect new graph data
-    const fingerprint = `${nodesFingerprint}-${layoutAlgorithm}`
+    if (!hasPositions) {
+      // No positions yet - wait for layout to run
+      console.log('[AutoFit] Early return - no positions yet')
+      return
+    }
+
+    // Create a fingerprint that includes view mode, node count and a position checksum
+    const posSum = filteredNodes.slice(0, 5).reduce((acc, n) => acc + (n.position?.x ?? 0), 0)
+    const fingerprint = `${viewMode}-${filteredNodes.length}-${layoutAlgorithm}-${posSum.toFixed(0)}`
+    console.log('[AutoFit] Fingerprint:', fingerprint, 'Previous:', autoFitAppliedRef.current)
 
     // Only auto-fit once per unique fingerprint
-    if (autoFitAppliedRef.current === fingerprint) return
+    if (autoFitAppliedRef.current === fingerprint) {
+      console.log('[AutoFit] Skipping - already applied')
+      return
+    }
 
-    // Delay to ensure layout has settled
+    // Delay to ensure layout has settled (reduced since view is hidden until ready)
+    console.log('[AutoFit] Scheduling auto-fit in 100ms')
     const timer = setTimeout(() => {
+      console.log('[AutoFit] Applying auto-fit now')
       autoFitAppliedRef.current = fingerprint
       handleFitToView()
-    }, 150)
+      setIsViewReady(true) // Show view after auto-fit
+    }, 100)
 
     return () => clearTimeout(timer)
-  }, [nodesFingerprint, layoutAlgorithm, handleFitToView, filteredNodes])
+  }, [filteredNodes, layoutAlgorithm, viewMode, handleFitToView])
 
-  // Scroll wheel zoom - allow zooming out to 1% for spread out graphs
-  const handleWheel = (e: React.WheelEvent) => {
+  // Scroll wheel zoom - direct DOM manipulation, sync state when done
+  const zoomRef = useRef(zoomLevel)
+  const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Keep refs in sync with state (for when state changes from other sources like auto-fit)
+  useEffect(() => {
+    zoomRef.current = zoomLevel
+  }, [zoomLevel])
+
+  useEffect(() => {
+    panRef.current = { x: panX, y: panY }
+  }, [panX, panY])
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
-    const delta = e.deltaY > 0 ? 0.9 : 1.1 // Zoom out or in
-    const newZoom = Math.max(1, Math.min(400, zoomLevel * delta))
-    setZoomLevel(newZoom)
-  }
+    if (!svgRef.current) return
+
+    // Block state→DOM sync while interacting
+    isInteractingRef.current = true
+
+    // Get actual SVG dimensions (not props - actual rendered size)
+    const rect = svgRef.current.getBoundingClientRect()
+    const svgWidth = rect.width
+    const svgHeight = rect.height
+
+    // Read current viewBox directly from DOM to ensure we have actual values
+    const currentViewBox = svgRef.current.getAttribute('viewBox')
+    if (!currentViewBox) return
+
+    const [currentPanX, currentPanY, currentVBWidth, currentVBHeight] = currentViewBox.split(' ').map(Number)
+
+    // Get cursor position relative to SVG element (as ratio 0-1)
+    const cursorX = e.clientX - rect.left
+    const cursorY = e.clientY - rect.top
+    const cursorRatioX = cursorX / svgWidth
+    const cursorRatioY = cursorY / svgHeight
+
+    // Smooth zoom with good responsiveness
+    const scrollAmount = Math.abs(e.deltaY)
+    // Scale the zoom based on scroll intensity for natural feel
+    // Mouse wheel: ~2-3% per tick, Trackpad: ~0.5-1% per tick
+    const zoomIntensity = Math.min(scrollAmount / 500, 0.03) + 0.005
+    const baseMultiplier = 1 - zoomIntensity
+    // Zoom in = smaller viewBox, zoom out = larger viewBox
+    const scaleFactor = e.deltaY > 0 ? (1 / baseMultiplier) : baseMultiplier
+
+    // Calculate new viewBox dimensions directly (avoid zoom level round-trip)
+    const newViewBoxWidth = currentVBWidth * scaleFactor
+    const newViewBoxHeight = currentVBHeight * scaleFactor
+
+    // Clamp to zoom limits (1% to 400%)
+    const minVBWidth = svgWidth / 4    // 400% zoom
+    const maxVBWidth = svgWidth * 100  // 1% zoom
+    if (newViewBoxWidth < minVBWidth || newViewBoxWidth > maxVBWidth) {
+      return // At zoom limit, don't process
+    }
+
+    // Calculate zoom for state (derived from viewBox, not the other way around)
+    const newZoom = (svgWidth / newViewBoxWidth) * 100
+
+    // Convert cursor position to graph coordinates (using current viewBox from DOM)
+    const cursorGraphX = currentPanX + cursorRatioX * currentVBWidth
+    const cursorGraphY = currentPanY + cursorRatioY * currentVBHeight
+
+    // Calculate new pan so cursor stays over same graph point
+    const newPanX = cursorGraphX - cursorRatioX * newViewBoxWidth
+    const newPanY = cursorGraphY - cursorRatioY * newViewBoxHeight
+
+    // Update refs for panning consistency
+    zoomRef.current = newZoom
+    panRef.current = { x: newPanX, y: newPanY }
+
+    // Direct DOM update - no React re-render
+    svgRef.current.setAttribute('viewBox',
+      `${newPanX} ${newPanY} ${newViewBoxWidth} ${newViewBoxHeight}`)
+
+    // Debounce the React state sync - only update after user stops scrolling
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current)
+    }
+    zoomTimeoutRef.current = setTimeout(() => {
+      isInteractingRef.current = false
+      skipNextSyncRef.current = true  // Skip the sync since DOM already has correct values
+      setZoomLevel(newZoom)
+      setPanX(newPanX)
+      setPanY(newPanY)
+    }, 150) // Sync state 150ms after last wheel event
+  }, [setZoomLevel])
 
   // Minimap navigation
   const handleMinimapNavigate = (x: number, y: number) => {
@@ -619,11 +783,26 @@ export function GraphCanvas({
     setPanY(y - height / 2)
   }
 
-  // Calculate viewBox based on zoom and pan
-  const zoomDecimal = zoomLevel / 100
-  const viewBoxWidth = width / zoomDecimal
-  const viewBoxHeight = height / zoomDecimal
-  const viewBox = `${panX} ${panY} ${viewBoxWidth} ${viewBoxHeight}`
+  // Sync state to DOM viewBox (only when not actively interacting)
+  // This prevents React re-renders from overwriting direct DOM updates during zoom/pan
+  useEffect(() => {
+    // Skip if actively interacting
+    if (isInteractingRef.current) return
+
+    // Skip one sync after interaction ends (DOM already has correct values)
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false
+      return
+    }
+
+    if (svgRef.current) {
+      // Use actual SVG dimensions for consistent viewBox calculations
+      const rect = svgRef.current.getBoundingClientRect()
+      const vbWidth = rect.width / (zoomLevel / 100)
+      const vbHeight = rect.height / (zoomLevel / 100)
+      svgRef.current.setAttribute('viewBox', `${panX} ${panY} ${vbWidth} ${vbHeight}`)
+    }
+  }, [zoomLevel, panX, panY])
 
   return (
     <div className="relative w-full h-full bg-zinc-950 overflow-hidden" data-testid="graph-canvas">
@@ -639,13 +818,12 @@ export function GraphCanvas({
         }}
       />
 
-      {/* Main SVG canvas */}
+      {/* Main SVG canvas - viewBox controlled via DOM only to prevent React re-render conflicts */}
       <svg
         ref={svgRef}
         width="100%"
         height="100%"
-        viewBox={viewBox}
-        className={isPanning ? 'cursor-grabbing' : 'cursor-grab'}
+        style={{ cursor: 'grab' }}
         preserveAspectRatio="xMidYMid meet"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -654,10 +832,10 @@ export function GraphCanvas({
         onWheel={handleWheel}
       >
         {/* Edges (rendered first, behind nodes) */}
-        <g className="edges">
+        <g className="edges" style={{ opacity: isViewReady ? 1 : 0, transition: 'opacity 150ms ease-in' }}>
           {filteredEdges.map((edge) => {
-            const sourceNode = filteredNodes.find((n) => n.id === edge.source)
-            const targetNode = filteredNodes.find((n) => n.id === edge.target)
+            const sourceNode = nodeMap.get(edge.source)
+            const targetNode = nodeMap.get(edge.target)
             if (!sourceNode || !targetNode) return null
 
             const highlighted = isEdgeHighlighted(edge.source, edge.target)
@@ -680,7 +858,7 @@ export function GraphCanvas({
         </g>
 
         {/* Nodes */}
-        <g className="nodes">
+        <g className="nodes" style={{ opacity: isViewReady ? 1 : 0, transition: 'opacity 150ms ease-in' }}>
           {filteredNodes.map((node) => (
             <GraphNode
               key={node.id}
@@ -693,26 +871,22 @@ export function GraphCanvas({
               language={node.language}
               symbolKind={node.symbolKind}
               connectionCount={connectionCounts[node.id] || 0}
-              onHover={() => hoverNode(node.id)}
-              onHoverEnd={() => hoverNode(null)}
-              onClick={() => selectNode(node.id)}
-              onDoubleClick={() => {
-                // TODO: Open in editor via Tauri
-                console.log('Open in editor:', node.id)
-              }}
+              onHover={handleNodeHover}
+              onHoverEnd={handleNodeHoverEnd}
+              onClick={handleNodeClick}
+              onDoubleClick={handleNodeDoubleClick}
             />
           ))}
         </g>
 
-        {/* Hover popover */}
-        {hoveredPopover && (
-          <NodePopover
-            content={hoveredPopover.content}
-            x={hoveredPopover.x}
-            y={hoveredPopover.y}
-          />
-        )}
       </svg>
+
+      {/* Top-right: Hover popover */}
+      {hoveredPopover && (
+        <div className="absolute top-4 right-4 z-20">
+          <NodePopover content={hoveredPopover.content} />
+        </div>
+      )}
 
       {/* Top-left: View mode and Layout controls */}
       <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
@@ -720,10 +894,10 @@ export function GraphCanvas({
         <LayoutSwitcher layout={layoutAlgorithm} onLayoutChange={setLayoutAlgorithm} />
       </div>
 
-      {/* Bottom-right: MiniMap + Zoom controls combined */}
-      <div className="absolute bottom-4 right-4 z-20 flex items-end gap-2">
+      {/* Bottom-left: MiniMap */}
+      <div className="absolute bottom-4 left-4 z-20">
         <MiniMap
-          nodes={filteredNodes.map((n) => ({ ...n, state: getNodeState(n.id) }))}
+          nodes={minimapNodes}
           edges={filteredEdges}
           viewportX={panX}
           viewportY={panY}
@@ -732,6 +906,10 @@ export function GraphCanvas({
           zoom={zoomLevel}
           onNavigate={handleMinimapNavigate}
         />
+      </div>
+
+      {/* Bottom-right: Zoom controls */}
+      <div className="absolute bottom-4 right-4 z-20">
         <ZoomControls
           zoom={zoomLevel}
           onZoomIn={handleZoomIn}

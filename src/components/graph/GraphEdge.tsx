@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { RelationshipKind } from '@/types'
 
 interface GraphEdgeProps {
@@ -21,7 +22,7 @@ const kindColors: Record<RelationshipKind, { stroke: string; opacity: number }> 
   contains: { stroke: 'stroke-zinc-600', opacity: 0.3 },
 }
 
-export function GraphEdge({
+export const GraphEdge = memo(function GraphEdge({
   id,
   sourceX,
   sourceY,
@@ -106,4 +107,4 @@ export function GraphEdge({
       />
     </g>
   )
-}
+})

@@ -38,7 +38,9 @@ export function useFilteredGraph() {
 
   // Filter nodes based on filter state
   const filteredNodes = useMemo(() => {
-    return nodes.filter((node) => {
+    console.log('[FilteredGraph] Filtering - nodes:', nodes.length, 'viewMode:', viewMode)
+
+    const result = nodes.filter((node) => {
       // View mode filter: file vs symbol level
       if (viewMode === 'file' && node.type !== 'file') {
         return false
@@ -71,6 +73,9 @@ export function useFilteredGraph() {
 
       return true
     })
+
+    console.log('[FilteredGraph] Result - filteredNodes:', result.length, 'node types:', [...new Set(result.map(n => n.type))])
+    return result
   }, [nodes, filterState, viewMode])
 
   // Get set of filtered node IDs for edge filtering

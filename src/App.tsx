@@ -59,13 +59,17 @@ function App() {
 
   // Refresh graph when viewMode changes
   useEffect(() => {
+    console.log('[App] viewMode effect - current:', viewMode, 'previous:', previousViewModeRef.current, 'project:', currentProject?.id)
+
     // Skip if viewMode hasn't actually changed or no project loaded
     if (previousViewModeRef.current === viewMode || !currentProject) {
+      console.log('[App] Skipping refresh - no change or no project')
       return
     }
 
     previousViewModeRef.current = viewMode
 
+    console.log('[App] Calling refreshGraph with viewMode:', viewMode)
     // Fetch graph data with the new viewMode
     refreshGraph(currentProject.id, { viewMode }).catch((err) => {
       console.error('Failed to refresh graph:', err)

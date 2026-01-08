@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { memo, useMemo, useCallback } from 'react'
 import type { Language, SymbolKind } from '@/types'
 
 interface GraphNodeProps {
@@ -11,10 +11,10 @@ interface GraphNodeProps {
   language?: Language
   symbolKind?: SymbolKind
   connectionCount: number
-  onHover?: () => void
-  onHoverEnd?: () => void
-  onClick?: () => void
-  onDoubleClick?: () => void
+  onHover?: (id: string) => void
+  onHoverEnd?: (id: string) => void
+  onClick?: (id: string) => void
+  onDoubleClick?: (id: string) => void
 }
 
 // Node colors by type
@@ -76,7 +76,7 @@ const languageAccents: Partial<Record<Language, string>> = {
   rust: 'stroke-orange-600',
 }
 
-export function GraphNode({
+export const GraphNode = memo(function GraphNode({
   id,
   x,
   y,
@@ -117,20 +117,28 @@ export function GraphNode({
   // Truncate name for display
   const displayName = name.length > 12 ? name.slice(0, 10) + '...' : name
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    onClick?.()
-  }
+    onClick?.(id)
+  }, [onClick, id])
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    onDoubleClick?.()
-  }
+    onDoubleClick?.(id)
+  }, [onDoubleClick, id])
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Prevent pan from starting when clicking on nodes
     e.stopPropagation()
-  }
+  }, [])
+
+  const handleMouseEnter = useCallback(() => {
+    onHover?.(id)
+  }, [onHover, id])
+
+  const handleMouseLeave = useCallback(() => {
+    onHoverEnd?.(id)
+  }, [onHoverEnd, id])
 
   return (
     <g
@@ -138,8 +146,8 @@ export function GraphNode({
       className="cursor-pointer"
       style={{ transition: 'transform 200ms ease-out, opacity 200ms ease-out' }}
       opacity={stateOpacity[state]}
-      onMouseEnter={onHover}
-      onMouseLeave={onHoverEnd}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onMouseDown={handleMouseDown}
@@ -253,4 +261,4 @@ export function GraphNode({
       </text>
     </g>
   )
-}
+})

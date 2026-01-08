@@ -189,11 +189,15 @@ export function useProjectActions() {
    * Refresh graph data (e.g., after filter change)
    */
   const refreshGraph = useCallback(async (projectId: string, filters?: Parameters<typeof api.getGraphData>[1]) => {
+    console.log('[refreshGraph] Starting - projectId:', projectId, 'filters:', filters)
     setIsLoading(true)
     setError(null)
 
     try {
       const graphData = await api.getGraphData(projectId, filters)
+      console.log('[refreshGraph] Received data - nodes:', graphData.nodes.length, 'edges:', graphData.edges.length)
+      console.log('[refreshGraph] Node types:', [...new Set(graphData.nodes.map(n => n.type))])
+      console.log('[refreshGraph] First node:', graphData.nodes[0])
       setNodes(graphData.nodes)
       setEdges(graphData.edges)
 

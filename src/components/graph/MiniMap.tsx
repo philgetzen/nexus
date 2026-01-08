@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { GraphNode, GraphEdge } from '@/types'
 
 interface MiniMapProps {
@@ -11,7 +12,7 @@ interface MiniMapProps {
   onNavigate?: (x: number, y: number) => void
 }
 
-export function MiniMap({
+export const MiniMap = memo(function MiniMap({
   nodes,
   edges,
   viewportX,
@@ -167,4 +168,4 @@ export function MiniMap({
       </div>
     </div>
   )
-}
+})
